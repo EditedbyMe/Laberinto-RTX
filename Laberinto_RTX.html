@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Laberinto RTX</title>
+  <style>
+    body {
+      background: #121221;
+      color: white;
+      font-family: monospace;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      margin: 10px;
+    }
+    canvas {
+      border: 4px solid #00ffcc;
+      box-shadow: 0 0 30px #00ffcc;
+      margin-top: 10px;
+    }
+    #menu {
+      display: flex;
+      gap: 10px;
+      margin-top: 15px;
+    }
+    button {
+      padding: 10px 18px;
+      background: #00ffcc;
+      color: #121221;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    button:hover {
+      background-color: #00ddbb;
+    }
+    #message {
+      margin-top: 15px;
+      font-size: 18px;
+      min-height: 24px;
+      animation: fadeIn 0.5s ease-out;
+    }
+    #share {
+      margin-top: 15px;
+      color: #fff;
+    }
+    #timer {
+      position: absolute;
+      top: 10px;
+      right: 20px;
+      font-size: 18px;
+      color: #00ffcc;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.95);}
+      to { opacity: 1; transform: scale(1);}
+    }
+  </style>
+</head>
+<body>
+  <h1>Laberinto RTX</h1>
+  <div id="timer">⏱️ 00:00</div>
+  <canvas id="maze" width="600" height="600"></canvas>
+  <div id="menu">
+    <button onclick="startGame('tutorial')">🧭 Tutorial</button>
+    <button onclick="startGame('normal')">🎮 Normal</button>
+    <button onclick="startGame('dificil')">🔥 Difícil</button>
+  </div>
+  <div id="message">Selecciona un modo para comenzar.</div>
+  <div id="share">Sube una partida pasándote el laberinto y te repostearemos. Usa el <strong>#laberintortx</strong></div>
+
+  <script>
+    const canvas = document.getElementById("maze");
+    const ctx = canvas.getContext("2d");
+    let cols = 20, rows = 20, cellSize;
+    let grid = [], stack = [], player, endCell, current;
+    let tutorial = false, difficulty = 'normal', timer = 0, timerInterval;
+    let tutStep = 0;
+    let animating = false;
+
+    class Cell {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.walls = [true, true, true, true];
+        this.visited = false;
+      }
+
+      draw() {
+        const x = this.x * cellSize;
+        const y = this.y * cellSize;
+        ctx.strokeStyle = "#00ffcc";
+        ctx.lineWidth = 2;
+        if (this.walls[0]) line(x, y, x + cellSize, y);
+        if (this.walls[1]) line(x + cellSize, y, x + cellSize, y + cellSize);
+        if (this.walls[2]) line(x + cellSize, y + cellSize, x, y + cellSize);
+        if (this.walls[3]) line(x, y + cellSize, x, y);
+        if (this.visited) {
+          ctx.fillStyle = "#0f0f1e";
+          ctx.fillRect(x, y, cellSize, cellSize);
+        }
+      }
+
+      highlight(color) {
+        const x = this.x * cellSize;
+        const y = this.y * cellSize;
+        ctx.fillStyle = color;
+        ctx.fillRect(x + 4, y + 4, cellSize - 8, cellSize - 8);
+      }
+
+      neighbors() {
+        const neighbors = [];
+        const top = grid[index(this.x, this.y - 1)];
+        const right = grid[index(this.x + 1, this.y)];
+        const bottom = grid[index(this.x, this.y + 1)];
+        const left = grid[index(this.x - 1, this.y)];
+        if (top && !top.visited) neighbors.push(top);
+        if (right && !right.visited) neighbors.push(right);
+        if (bottom && !bottom.visited) neighbors.push(bottom);
+        if (left && !left.visited) neighbors.push(left);
+        return neighbors.length ? neighbors[Math.floor(Math.random() * neighbors.length)] : undefined;
+      }
+    }
+
+    function index(x, y) {
+      return (x < 0 || y < 0 || x >= cols || y >= rows) ? -1 : x + y * cols;
+    }
+
+    function line(x1, y1, x2, y2) {
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+
+    function removeWalls(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      if (dx === 1) { a.walls[3] = false; b.walls[1] = false; }
+      else if (dx === -1) { a.walls[1] = false; b.walls[3] = false; }
+      if (dy === 1) { a.walls[0] = false; b.walls[2] = false; }
+      else if (dy === -1) { a.walls[2] = false; b.walls[0] = false; }
+    }
+
+    function setupGrid() {
+      grid = [];
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          grid.push(new Cell(x, y));
+        }
+      }
+      current = grid[0];
+      current.visited = true;
+      stack = [current];
+    }
+
+    function drawMazeStep() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      grid.forEach(cell => cell.draw());
+      const next = current.neighbors();
+      if (next) {
+        next.visited = true;
+        stack.push(current);
+        removeWalls(current, next);
+        current = next;
+      } else if (stack.length > 0) {
+        current = stack.pop();
+      }
+      if (stack.length > 0) {
+        requestAnimationFrame(drawMazeStep);
+      } else {
+        finalizeMaze();
+      }
+    }
+
+    function finalizeMaze() {
+      grid.forEach(cell => cell.draw());
+      player = grid[0];
+      endCell = grid[grid.length - 1];
+      drawGoal();
+      drawPlayer(true);
+      startTimer();
+    }
+
+    function drawPlayer(init = false) {
+      player.highlight("#00ffcc");
+    }
+
+    function drawGoal() {
+      endCell.highlight("#ff4444");
+    }
+
+    async function move(dx, dy) {
+      if (animating) return;
+      const nx = player.x + dx;
+      const ny = player.y + dy;
+      const next = grid[index(nx, ny)];
+      if (!next) return;
+      let canMove = false;
+      if (dx === 1 && !player.walls[1]) canMove = true;
+      if (dx === -1 && !player.walls[3]) canMove = true;
+      if (dy === 1 && !player.walls[2]) canMove = true;
+      if (dy === -1 && !player.walls[0]) canMove = true;
+
+      if (canMove) {
+        animating = true;
+        const startX = player.x;
+        const startY = player.y;
+        const endX = nx;
+        const endY = ny;
+        for (let i = 0; i <= 10; i++) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+          const lerpX = startX + (endX - startX) * (i / 10);
+          const lerpY = startY + (endY - startY) * (i / 10);
+          redraw();
+          ctx.fillStyle = "#00ffcc";
+          ctx.fillRect(lerpX * cellSize + 4, lerpY * cellSize + 4, cellSize - 8, cellSize - 8);
+        }
+        player = next;
+        animating = false;
+        if (tutorial) handleTutorialSteps();
+        checkWin();
+      }
+    }
+
+    function redraw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      grid.forEach(cell => cell.draw());
+      drawGoal();
+    }
+
+    function checkWin() {
+      if (player === endCell) {
+        clearInterval(timerInterval);
+        document.getElementById("message").textContent = `🎉 ¡Victoria! Tiempo: ${formatTime(timer)}. Usa #laberintortx`;
+      }
+    }
+
+    function handleTutorialSteps() {
+      if (tutStep === 0 && player.y === 1) {
+        document.getElementById("message").textContent = "¡Bien! Ahora ve a la derecha →";
+        tutStep++;
+      } else if (tutStep === 1 && player.x === 1) {
+        document.getElementById("message").textContent = "¡Tutorial completado! Ahora encuentra la salida.";
+        tutorial = false;
+      }
+    }
+
+    function startGame(mode) {
+      clearInterval(timerInterval);
+      timer = 0;
+      document.getElementById("timer").textContent = "⏱️ 00:00";
+      difficulty = mode;
+      tutorial = (mode === 'tutorial');
+      tutStep = 0;
+      cols = rows = (mode === 'tutorial') ? 10 : (mode === 'dificil' ? 30 : 20);
+      cellSize = canvas.width / cols;
+      document.getElementById("message").textContent =
+        tutorial ? "Tutorial: Baja ↓ y luego derecha →" :
+        (mode === 'normal' ? "Modo Normal: ¡Encuentra la salida!" : "Modo Difícil activado. ¡Suerte!");
+      setupGrid();
+      drawMazeStep();
+    }
+
+    document.addEventListener("keydown", e => {
+      if (!player) return;
+      switch (e.key) {
+        case "ArrowUp": case "w": move(0, -1); break;
+        case "ArrowDown": case "s": move(0, 1); break;
+        case "ArrowLeft": case "a": move(-1, 0); break;
+        case "ArrowRight": case "d": move(1, 0); break;
+      }
+    });
+
+    function startTimer() {
+      timer = 0;
+      timerInterval = setInterval(() => {
+        timer++;
+        document.getElementById("timer").textContent = `⏱️ ${formatTime(timer)}`;
+      }, 1000);
+    }
+
+    function formatTime(t) {
+      const m = String(Math.floor(t / 60)).padStart(2, "0");
+      const s = String(t % 60).padStart(2, "0");
+      return `${m}:${s}`;
+    }
+  </script>
+</body>
+</html>
